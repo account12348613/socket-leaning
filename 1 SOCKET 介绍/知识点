@@ -1,0 +1,69 @@
+SOCKET是一种IPC方法，可用于同一主机或者不同主机上不同应用程序之间交换数据
+通信方式如下：
+    各个应用程序创建一个socket，两个应用程序都需要创建
+    服务器将自己的socket绑定到一个总所周知的地址上，使得客户端能够定位到服务器的位置
+
+使用socket()系统调用能够创建一个socket，它返回一个socket的文件描述符，用于后续系统调用中引用该描述符。
+    fd = socket(domain, type, protocol);
+    后续介绍domain，本书中protocol总是本指定为0。
+
+通信domain
+    socket存在于一个通信domain中：
+        识别一个socket的方法
+        通信范围
+        UNIX(AF_UNIX) domain允许在同一主机上的应用程序之间进行通信
+        IPv4          domain允许 使用 因特网协议的第4版 连接起来的主机之间的应用程序之间进行通信
+        IPv6          domain允许 使用 因特网协议的第6版 连接起来的主机之间的应用程序之间进行通信
+
+    一般代码中会看见PF_UNIX而不是AF_UNIX。此处的AF表示"地址族(address family)",PF表示"协议族(protocol family)"。现在本书中会一直使用AF_常量
+    socket domain：
+        Domain          执行的通信           应用程序间的通信            地址格式            地址结构
+        AF_UNIX         内核中              同一主机                   路径名              sockaddr_un
+        AF_INET         通过IPv4            通过IPv4网络连接的主机       IP地址+端口号       sockaddr_in
+        AF_INET6        通过IPv6            通过IPv6网络连接的主机       IP地址+端口号       sockaddr_in6
+
+    socket类型:
+        至少两种：流(tcp)和数据报(udp)。
+        流socket(SOCK_STREAM)提供一个可靠的、双向的 字节流 通信信道
+            可靠的:表示发送者传输的数据会完整无缺地到达接收应用程序或者收到一个传输失败的通知。
+            双向的：表示数据可以在两个socket之间任意传输。
+            字节流：表示与管道一样的，不存在消息边界的概念。
+        流socket类似于使用一对允许在两个应用程序之间进行双向通信的管道，它们(流和管道)之间的差别在于socket允许在网络上进行通信。
+        流socket的正常工作需要一对相互连接的socket，所以流socket通常被成为面向连接的。
+
+        数据报socket(SOCK_DGRAM)允许数据以数据报的形式进行传输。在数据报socket中，消息边界得到了保留，但是数据传输是不可靠的。
+        消息的到达可能是无序的、重复的或者根本无法到达的。数据报socket在使用时，无需于另外一个socket连接。
+
+socket系统调用
+    关键的socket系统调用包括以下几种:
+        socket()    创建一个新的socket
+        bind()      将socket绑定到一个地址上。
+        listen()    允许一个流socket接受其他socket的接入连接。
+        accept()    在一个监听流socket上接受对等应用程序的连接。
+        connect()   建立与另外一个socket之间的连接。
+
+    socket IO可以 使用传统的read()和write()系统调用 或者使用socket特有的系统调用(send(),recv(),sendto(),recvfrom())来完成
+    默认情况下，这些系统调用在IO操作无法被立即完成时会阻塞，可以使用fcntl()的F_SETFL操作来启用O_NONBLOCK打开文件状态标记，可以执行非阻塞IO
+
+
+创建一个socket：socket()
+    socket()系统调用创建一个新的socket。
+    #include <sys/socket.h>
+    int socket(int domain, int type, int protocol);
+    返回值：成功时返回新的socket，失败返回-1.
+
+    domain：AF_UNIX,AF_INET,AF_INET6
+    type:SOCK_STREAM,SOCK_DGRAM
+    protocol:本书指定为0，在裸socket(SOCK_RAW)中会指定为IPPROTO_RAW。
+
+将socket绑定到地址：bind()
+    bind()系统调用将一个socket绑定到一个地址上
+    #include <sys/socket.h>
+    int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+    返回值：0代表成功，-1代表出错
+
+    sockfd是socket()系统调用中返回的文件描述符。
+    addr参数是一个指针，指向该socket绑定到的地址的结构。参数类型取决于domain类型。
+    addrlen是addr指针指向区域的长度。
+
+    一般会把socket绑定到一个总所周知的地址上，即一个固定的、客户端提前知道的地址。
