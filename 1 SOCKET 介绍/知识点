@@ -176,4 +176,13 @@ socket系统调用
     这会导致内核记录这个socket的对等socket的地址。
     已连接的数据报socket就是这种socket。
     非连接的数据报socket指的是没有调用connect()的数据报socket。
+
+    当一个数据报socket使用connect()已连接后：
+        1.数据报的发送可使用write()或者send()来完成，会自动发送到同样的对等socket上。
+        2.在这个socket上只能读取对等socket发送的数据报。
+    connect()的作用对数据报socket是不对称的，已连接的数据报socket已经指定了收、发的对等程序，而另外一端未指定。
+    可以在发起一个connect()调用修改一个已连接的数据报socket的对等socket。如果指定地址族为AF_UNSPEC，还可以解除对等的关联关系。
+
+    为数据报socket指定一个对等的socket，优势在于上传数据时，可以使用简单的IO系统调用，无需指定addr和length的参数。
+    为一个数据报socket指定对等的socket，能够在性能上带来提升，在Linux上，连接一个数据报socket能对性能产生些许差异。
     
