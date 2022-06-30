@@ -66,4 +66,114 @@ socket系统调用
     addr参数是一个指针，指向该socket绑定到的地址的结构。参数类型取决于domain类型。
     addrlen是addr指针指向区域的长度。
 
-    一般会把socket绑定到一个总所周知的地址上，即一个固定的、客户端提前知道的地址。
+    一般会把socket绑定到一个众所周知的地址上，即一个固定的、客户端提前知道的地址。
+
+通用socket地址结构：struct sockaddr
+    不同的domain使用了不同的地址格式
+    UNIX domain socket使用路径名
+    internet domain socket使用地址+端口号
+
+    为了支持所有socket domain，socket API定义了一个通用的地址结构struct sockaddr
+        struct sockaddr{
+            sa_family_t sa_family;
+            char        sa_data[14];
+        };
+    sa_family对应domain字段，剩余部分就足以确定地址大小和格式了。
+
+流socket
+    流socket的运作与电话系统类似
+        1.socket()系统调用创建一个socket，等价于安装一个电话。要实现通信，不同的应用程序都必须创建一个socket
+        2.通过流socket通信类似与一个电话呼叫，通信之前两个socket必须要连接上:
+            a.一个应用程序调用bind()将socket绑定到一个众所周知的地址上，然后调用listen()通知内核接受接入连接的意愿。
+                类似于有了一个大家都知道的电话号码并打开了电话，人们就可以打进电话了
+            b.其他的应用程序通过调用connect()建立连接，同时指定需要连接的socket地址，类似于拨某人的电话号码。
+            c.调用listen()的应用程序使用accept()接受连接。类似于在电话响起的时候接通电话。
+                如果在对等应用程序connect之前先执行了accept，那么accept就会阻塞。
+        3.一旦建立了连接，就可以在应用程序之间进行双向的数据传输。直到一个使用close()关闭连接为止。
+            通信可以使用传统的read()和write()系统调用，也可以使用socket特有的系统调用send(),recv(),sendto(),recvfrom()来完成。
+
+主动和被动socket
+    流socket通常可以分为主动和被动两种
+    执行主动socket打开的应用程序被称为客户端。
+    被动执行socket打开的应用程序被成为服务端。
+
+监听接入连接：listen()
+    listen仅用于tcp服务器调用
+    #include <sys/socket.h>
+    int listen(int sockfd, int backlog);
+    返回值:0代表成功，-1代表失败。
+
+    无法在已经连接的socket上执行listen。
+    客户端可能会在服务端调用accept()之前调用connect(),这将会产生一个未决的连接。
+    内核必须要记录所有未决的连接请求的相关信息，后续服务端的accept()就能够处理这些请求了。
+
+    backlog参数允许限制这种未决连接的数量。
+    在这个限制之内的连接请求会立即成功，限制之外的连接请求会阻塞知道一个未决的连接被接受（accept），并将未决连接队列删除为止。
+
+    bcaklog参数指定已连接和未决连接的最大值。
+
+接受连接：accept()
+    accept()系统调用在文件描述符socket引用的监听流socket上接受一个接入连接。如果在调用accept()时不存在未决的连接，那么就阻塞直到有连接请求到达。
+    #include <sys/socket.h>
+    int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+    返回值：成功时返回新的描述符，失败返回-1.
+
+    accept()会创建一个新的socket描述符与对等应用程序调用connect()的描述符进行连接。accept()系统调用会返回已经连接的socket文件描述符。
+    监听socket会保持打开的状态，并且可以用于接受后续的连接。
+
+    传入accept()的参数会返回对端的socket地址，addr参数指向了一个用来返回socket的地址结构。
+    addrlen参数时一个值-结果参数，调用之前必须初始化为addr指向的缓冲区大小，在accept之后，这个参数被赋值为实际被复制进缓冲区的数据字节数。
+    如果不关心对端socket的地址，可将addr和addrlen分别指定为NULL和0.（后续需要的话，可使用getpeername()系统调用来获取对端的地址）
+
+连接到对等socket：connect()
+    connect()系统调用将文件描述符sockfd引用的主动socket连接到地址addr和addrlen指定的监听socket上。
+    #include <sys/socket.h>
+    int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+    返回值：0代表成功，-1代表失败。
+
+    addr和addrlen参数的指定方式与bind()系统调用中对应参数的指定方式相同。
+
+流socket I/O
+    一对连接的流socket在两个端点之间提供了一个双向的通信信道
+    连接流socket上的IO语义与管道上的IO语义类似:
+        1.要执行IO操作需要使用到read()和write()系统调用(或者使用socket特有的send()、recv()系统调用)
+        2.一个socket在 使用close()来关闭 或者应用程序终止后关闭。
+            对端如果继续读取数据，就会收到文件结束。如果继续写数据，将会收到SIGPIPE的信号，并且系统调用返回EPIPE错误
+
+连接终止：close()
+    终止一个流socket连接的常见方式是调用close()
+    假设在关闭一个连接后，对端应用程序崩溃、没有读取到数据、错误处理了数据，这样本端就无法知道发生了一个错误，无法对错误进行修正。
+    如果需要确保最后的数据被成功接受并处理，就需要在对等应用程序之间构建某种协议，来达到这种目的。
+    后续将介绍shutdown()系统调用，它提供了对关闭一个流socket更加精细的控制。
+
+
+
+数据报socket
+    数据报socket类似于邮政系统。
+        1.socket()系统调用创建一个邮箱。
+        2.为允许另外一个应用程序发送数据报到本机，使用bind()将socket绑定到一个众所周知的地址上。
+        3.使用sendto()系统调用发送一个数据报，参数中包含了对端应用程序的地址。
+        4.使用recvfrom()系统调用来接收一个数据报，没有数据到达时会阻塞。
+        5.不需要socket的时候，使用close()关闭socket。
+    与邮政系统一样，多个数据报到达目的地的顺序可能是无序的，甚至是无法到达。丢包时会重新传输数据报，所有到达可能是重复的数据报。
+
+交换数据报：recvfrom()和sendto()
+    recvfrom()和sendto()系统调用在一个数据报socket上接收和发送数据报。
+    #inluce <sys/socket.h>
+    ssize_t recvfrom(int sockfd, void *buffer, size_t lenght, int flags, struct sockaddr *src_addr, socklen_t *addrlen);
+    返回值：成功时返回收到的字节数，0表示EOF，-1表示出错
+    ssize_t sendto(int sockfd, const void *buffer, size_t lenght, int flags, const struct sockaddr *dest_addr, socklen_t addrlen);
+    返回值：成功时返回发送的字节数，-1代表出错。
+
+    这两个系统调用的返回值和前三个参数都和read(),write()相同。
+    第四个参数flags是一个位掩码，它控制着socket特定的IO特性。后续将进行介绍，如果不需要任何一种特性，可以把flags设置为0。
+    src_addr和addrlen参数用来获取对等应用程序的地址信息，如果不关心对端的地址信息，可以将两者都指定为NULL
+    dest_addr和addrlen参数用来指定对等应用程序的地址信息，向其发送数据。
+    length参数值指定了发送、接收的字节大小，接收时超过了length时，会截短为length字节。
+
+在数据报socket上使用connect()
+    尽管数据报socket是无连接的，但是在数据报socket上使用connect()系统调用仍然是起作用的。
+    这会导致内核记录这个socket的对等socket的地址。
+    已连接的数据报socket就是这种socket。
+    非连接的数据报socket指的是没有调用connect()的数据报socket。
+    
