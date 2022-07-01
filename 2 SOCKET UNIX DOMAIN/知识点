@@ -1,0 +1,131 @@
+SOCKET: UNIX DOMAIN
+本章介绍：
+    同一主机上的进程之间的相互通信的UNIX domain socket的用法
+    UNIX domain中 流socket
+    UNIX domain中 数据报socket
+    使用文件权限控制对UNIX domain socket的访问
+    使用socketpair()创建一对相互连接的 UNIX domain socket
+    LINUX的抽象socket名空间。
+
+UNIX domain socket地址：struct sockaddr_un
+    struct sockaddr_un  {
+        sa_family_t sun_family;
+        char sun_path[108];
+    };
+    早期没有规定sun_path的大小，在可移植的应用程序在编码时应该采用最低值。
+    在向这个字段写入数据时可使用snprintf(), strncpy()函数以避免缓冲区溢出。
+
+    代码：将一个UNIX domain socket绑定到一个地址上
+***********************************************************
+    const char *SOCKNAME = "/tmp/mysock";
+    int sfd;
+    struct sockaddr_un addr;
+
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if(sfd == -1)
+        printf("create socket err\n");
+
+    memset(&addr, 0, sizeof(struct sockaddr_un));
+
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKNAME, sizeof(addr.sun_path)-1);
+    if(bind(sfd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) == -1)
+        printf("bind socket err\n");
+***********************************************************
+    memset()调用确保所有字节都是0
+    strncpy()中的sun_path字段的大小-1为了确保总有一个结束的null字节
+
+    绑定UNIX domain socket时，bind()会在文件系统中创建一个条目。
+    文件的所有权将根据常规文件创建规则来确定。
+    这个文件会被标记为socket
+    在此路径名上应用stat()时，在stat结构的st_mode字段的文件类型部分为S_IFSOCK.
+
+    绑定一个UNIX domain socket需要注意以下几点:
+        无法将socket绑定到一个既有的路径名上。否则绑定失败，bind()返回EADDRINUSE错误。
+        通常将socket绑定到一个绝对路径上。
+        一个socket只能绑定到一个路径名上，反过来，一个路径名也只能绑定一个socket。
+        无法使用open()打开一个socket
+        不需要socket的时候使用unlink()或者remove()删除其路径名条目
+
+    一般把UNIX domain socket绑定到/tmp目录下，通常此目录都是可读可写的。
+    但是此类公共目录中创建文件可能导致安全问题。例如创建一个名字与socket路径名一样的路径名之后就能够完成一个简单的拒绝服务的攻击了。
+
+UNIX domain中的流socket
+    例子：
+        客户端：连接到服务器后，把标准输入中的数据传输到服务器上。
+        服务器：接收客户端的连接，把接收到的数据输出到标准输出上。服务器一次只处理一个客户端。
+
+    头文件
+***********************************************************
+    #ifndef _MY_S0CK_H
+    #define _MY_SOCK_H
+
+    #include <sys/un.h>
+    #include <sys/socket.h>
+    #include <stdio.h>
+    #include <errno.h>
+    #include <unistd.h>
+
+    #define SV_SOCK_PATH "/tmp/mysock"
+    #define BUF_SIZE 100
+
+    #endif
+***********************************************************
+
+    服务器
+***********************************************************
+#include "my_sock.h"
+
+#define BACKLOG 5
+
+int main()
+{
+    struct sockaddr_un addr;
+    int sfd, cfd;
+    ssize_t numRead;
+    char buf[BUF_SIZE];
+
+    sfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if(sfd < 0)
+        printf("create socket err\n");
+    if(remove(SV_SOCK_PATH) == -1 && errno == ENOENT)
+    {
+        printf("remove file err\n");
+        return -1;
+    }
+    memset(&addr, 0 ,sizeof(struct  sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    strncpy(&addr.sun_path, SV_SOCK_PATH, sizeof(addr.sun_path)-1);
+    if(bind(sfd, &addr, sizeof(struct sockaddr_un)) == -1)
+    {
+        printf("bind err\n");
+        return -1;
+    }
+    if(listen(sfd, BACKLOG) == -1)
+    {
+        printf("listen err\n");
+        return -1;
+    }
+    while(1)
+    {
+        cfd = accept(sfd, NULL, NULL);
+        if(cfd == -1)
+        {
+            printf("accept err\n");
+            return -1;
+        }
+        while((numRead = read(cfd, buf, BUF_SIZE)) > 0)
+        {
+            if(write(STDOUT_FILENO, buf, numRead) != numRead)
+                printf("write err\n");
+        }
+        if(numRead == -1)
+        {
+            printf("read err\n");
+        }
+        if(close(cfd) == -1)
+            printf("close err\n");
+    }
+    return 0;
+}
+***********************************************************
